@@ -57,7 +57,13 @@ export function useExport() {
         const size = resolveCanvasSize(widthInches, heightInches, dpi);
 
         // 1. Capture map at full export resolution
-        const { canvas: mapCanvas, markerProjection, markerScaleX, markerScaleY } =
+        const {
+          canvas: mapCanvas,
+          markerProjection,
+          markerScaleX,
+          markerScaleY,
+          markerSizeScale,
+        } =
           await captureMapAsCanvas(
           map,
           size.width,
@@ -85,6 +91,7 @@ export function useExport() {
           markerProjection: hasVisibleMarkers ? markerProjection : undefined,
           markerScaleX: hasVisibleMarkers ? markerScaleX : undefined,
           markerScaleY: hasVisibleMarkers ? markerScaleY : undefined,
+          markerSizeScale: hasVisibleMarkers ? markerSizeScale : undefined,
         });
 
         // 3. Download

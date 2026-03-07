@@ -1805,6 +1805,18 @@ button.marker-picker__clear-uploaded {
   color: var(--marker-color);
 }
 
+.marker-settings-screen .marker-visual {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.82))
+    drop-shadow(0 0 3px rgba(5, 13, 20, 0.72));
+}
+
+.markers-summary-preview .marker-visual {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.82))
+    drop-shadow(0 0 3px rgba(5, 13, 20, 0.72));
+}
+
 .marker-visual__icon,
 .marker-visual__image {
   width: 100%;

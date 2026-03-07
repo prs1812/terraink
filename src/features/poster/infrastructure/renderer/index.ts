@@ -31,6 +31,7 @@ export async function compositeExport(
     markerProjection,
     markerScaleX = 1,
     markerScaleY = 1,
+    markerSizeScale = 1,
   } = options;
 
   const width = mapCanvas.width;
@@ -58,6 +59,7 @@ export async function compositeExport(
       markerProjection,
       markerScaleX,
       markerScaleY,
+      markerSizeScale,
     );
   }
 

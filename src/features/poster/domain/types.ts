@@ -30,6 +30,7 @@ export interface ExportOptions {
   markerProjection?: MarkerProjectionInput;
   markerScaleX?: number;
   markerScaleY?: number;
+  markerSizeScale?: number;
 }
 
 export interface Typography {
