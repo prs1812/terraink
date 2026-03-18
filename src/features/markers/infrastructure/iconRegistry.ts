@@ -5,7 +5,6 @@ import {
   FaBuilding,
   FaCamera,
   FaCircle,
-  FaDiamond,
   FaFlag,
   FaHeart,
   FaHouse,
@@ -73,7 +72,6 @@ export const predefinedMarkerIcons: MarkerIconDefinition[] = [
   createSvgIcon("flower", "Flower", IoMdFlower),
   createSvgIcon("tree", "Tree", FaTree),
   createSvgIcon("flag", "Flag", FaFlag),
-  createSvgIcon("diamond", "Diamond", FaDiamond),
 ];
 
 export const featuredMarkerIcons = predefinedMarkerIcons.slice(

@@ -18,7 +18,15 @@ import {
   MIN_MARKER_SIZE,
 } from "@/features/markers/infrastructure/constants";
 import MarkerVisual from "./MarkerVisual";
-import { CheckIcon, EditIcon, TrashIcon } from "@/shared/ui/Icons";
+import {
+  CheckIcon,
+  CloseIcon,
+  EditIcon,
+  GearIcon,
+  InfoIcon,
+  RotateLeftIcon,
+  TrashIcon,
+} from "@/shared/ui/Icons";
 import ColorPicker from "@/features/theme/ui/ColorPicker";
 import { buildDynamicColorChoices } from "@/features/theme/domain/colorSuggestions";
 import {
@@ -48,10 +56,6 @@ function isSvgFile(file: File) {
 
 function formatCoordinate(value: number) {
   return Number(value).toFixed(6);
-}
-
-interface MarkersSectionProps {
-  onEditorActiveChange?: (active: boolean) => void;
 }
 
 function DeleteAllMarkersModal({
@@ -111,29 +115,63 @@ function DeleteAllMarkersModal({
   );
 }
 
-export default function MarkersSection({
-  onEditorActiveChange,
-}: MarkersSectionProps) {
+export default function MarkersSection() {
   const { state, dispatch, mapRef, effectiveTheme } = usePosterContext();
-  const { form, markers, customMarkerIcons, markerDefaults } = state;
-  const [isEditorActive, setIsEditorActive] = useState(false);
+  const {
+    form,
+    markers,
+    customMarkerIcons,
+    markerDefaults,
+    isMarkerEditorActive,
+    activeMarkerId,
+  } = state;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDefaultColorPickerOpen, setIsDefaultColorPickerOpen] =
     useState(false);
   const [openMarkerColorPickerId, setOpenMarkerColorPickerId] = useState<
     string | null
   >(null);
-  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
   const [expandedMarkerId, setExpandedMarkerId] = useState<string | null>(null);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const markerThemeColor = effectiveTheme.ui.text;
-  const hasActiveMarkerEdit = Boolean(expandedMarkerId);
+  const hasMarkers = markers.length > 0;
+  const isColorPickerFocused =
+    isMarkerEditorActive &&
+    expandedMarkerId !== null &&
+    openMarkerColorPickerId === expandedMarkerId;
 
   const toggleMarkerEditor = useCallback((markerId: string) => {
-    setExpandedMarkerId((current) => (current === markerId ? null : markerId));
+    setExpandedMarkerId((current) => {
+      const next = current === markerId ? null : markerId;
+      dispatch({ type: "SET_ACTIVE_MARKER", markerId: next });
+      return next;
+    });
     setOpenMarkerColorPickerId((current) =>
       current === markerId ? null : current,
     );
-  }, []);
+  }, [dispatch]);
+
+  const openMarkerEditor = useCallback(
+    (markerId: string) => {
+      setExpandedMarkerId(markerId);
+      setOpenMarkerColorPickerId(null);
+      dispatch({ type: "SET_ACTIVE_MARKER", markerId });
+    },
+    [dispatch],
+  );
+
+  const removeMarker = useCallback(
+    (markerId: string) => {
+      dispatch({ type: "REMOVE_MARKER", markerId });
+      if (activeMarkerId === markerId) {
+        dispatch({ type: "SET_ACTIVE_MARKER", markerId: null });
+        setExpandedMarkerId(null);
+        setOpenMarkerColorPickerId(null);
+      }
+    },
+    [activeMarkerId, dispatch],
+  );
 
   const updateMarker = useCallback(
     (markerId: string, changes: Partial<MarkerItem>) => {
@@ -190,13 +228,22 @@ export default function MarkersSection({
   );
 
   const markerRows = useMemo(
-    () =>
-      markers.map((marker, index) => ({
-        marker,
-        index,
-        icon: findMarkerIcon(marker.iconId, customMarkerIcons),
-        isExpanded: expandedMarkerId === marker.id,
-      })),
+    () => {
+      const iconCounts = new Map<string, number>();
+      return markers.map((marker, index) => {
+        const icon = findMarkerIcon(marker.iconId, customMarkerIcons);
+        const iconLabel = String(icon?.label ?? "Marker").trim() || "Marker";
+        const nextCount = (iconCounts.get(iconLabel) ?? 0) + 1;
+        iconCounts.set(iconLabel, nextCount);
+        return {
+          marker,
+          index,
+          icon,
+          markerLabel: `${iconLabel} ${nextCount}`,
+          isExpanded: expandedMarkerId === marker.id,
+        };
+      });
+    },
     [customMarkerIcons, expandedMarkerId, markers],
   );
 
@@ -214,27 +261,47 @@ export default function MarkersSection({
   );
 
   useEffect(() => {
-    dispatch({ type: "SET_MARKER_EDITOR_ACTIVE", active: isEditorActive });
-    onEditorActiveChange?.(isEditorActive);
-  }, [dispatch, isEditorActive, onEditorActiveChange]);
+    if (typeof window === "undefined") {
+      return;
+    }
+    const mediaQuery = window.matchMedia(
+      "(max-width: 768px), (hover: none) and (pointer: coarse)",
+    );
+    const syncViewport = () => setIsMobileViewport(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
 
   useEffect(() => {
-    return () => {
-      dispatch({ type: "SET_MARKER_EDITOR_ACTIVE", active: false });
-      onEditorActiveChange?.(false);
-    };
-  }, [dispatch, onEditorActiveChange]);
+    if (isMarkerEditorActive) {
+      return;
+    }
+    setExpandedMarkerId(null);
+    setOpenMarkerColorPickerId(null);
+    setIsDefaultColorPickerOpen(false);
+  }, [isMarkerEditorActive]);
 
-  const handleResetAll = useCallback(() => {
-    dispatch({
-      type: "SET_MARKER_DEFAULTS",
-      defaults: {
-        size: DEFAULT_MARKER_SIZE,
-        color: markerThemeColor,
-      },
-      applyToMarkers: true,
-    });
-  }, [dispatch, markerThemeColor]);
+  useEffect(() => {
+    if (!isMarkerEditorActive) {
+      return;
+    }
+
+    if (!activeMarkerId) {
+      return;
+    }
+
+    const activeMarkerStillExists = markers.some(
+      (marker) => marker.id === activeMarkerId,
+    );
+    if (!activeMarkerStillExists) {
+      setExpandedMarkerId(null);
+      setOpenMarkerColorPickerId(null);
+      return;
+    }
+
+    setExpandedMarkerId(activeMarkerId);
+  }, [activeMarkerId, isMarkerEditorActive, markers]);
 
   const toggleMarkerSettings = useCallback(() => {
     setIsSettingsOpen((current) => {
@@ -250,156 +317,146 @@ export default function MarkersSection({
     setIsDefaultColorPickerOpen((current) => !current);
   }, []);
 
-  if (!isEditorActive) {
-    return (
-      <section className="panel-block">
-        <h2>Markers</h2>
+  const handleResetMarkers = useCallback(() => {
+    dispatch({
+      type: "SET_MARKER_DEFAULTS",
+      defaults: { size: DEFAULT_MARKER_SIZE, color: markerThemeColor },
+      applyToMarkers: true,
+    });
+  }, [dispatch, markerThemeColor]);
 
-        <div className="theme-section markers-summary-card">
-          <div className="theme-summary-header">
-            <p className="theme-active-label">
-              {markerRows.length === 0
-                ? "No markers added yet."
-                : `${markerRows.length} marker${markerRows.length === 1 ? "" : "s"} on the map.`}
-            </p>
-            <button
-              type="button"
-              className="theme-customize-btn marker-add-btn"
-              onClick={() => setIsEditorActive(true)}
-              aria-label="Edit markers"
-            >
-              <span className="theme-customize-icon" aria-hidden="true">
-                <EditIcon />
-              </span>
-              Edit Markers
-            </button>
-          </div>
+  const handleDeleteAllMarkers = useCallback(() => {
+    if (markers.length > 0) {
+      setIsDeleteAllModalOpen(true);
+    }
+  }, [markers.length]);
 
-          <p className="markers-summary-copy">
-            {markerRows.length === 0
-              ? "Open the marker editor to place icons at the current map center."
-              : "Open the marker editor to add more markers or adjust the ones already on the map."}
-          </p>
+  const toggleMarkerEditMode = useCallback(() => {
+    const next = !isMarkerEditorActive;
+    if (next) {
+      setIsSettingsOpen(false);
+      setIsDefaultColorPickerOpen(false);
+    }
+    dispatch({ type: "SET_MARKER_EDITOR_ACTIVE", active: next });
+    if (!next) {
+      dispatch({ type: "SET_ACTIVE_MARKER", markerId: null });
+      setExpandedMarkerId(null);
+      setOpenMarkerColorPickerId(null);
+    }
+  }, [dispatch, isMarkerEditorActive]);
 
-          {markerRows.length > 0 ? (
-            <div className="markers-summary-preview" aria-hidden="true">
-              {markerRows
-                .slice(0, 6)
-                .map(({ marker, icon }) =>
-                  icon ? (
-                    <MarkerVisual
-                      key={marker.id}
-                      icon={icon}
-                      size={24}
-                      color={marker.color}
-                    />
-                  ) : null,
-                )}
-              {markerRows.length > 6 ? (
-                <span className="markers-summary-preview-count">
-                  +{markerRows.length - 6}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </section>
-    );
-  }
+  const visibleMarkerRows =
+    isMarkerEditorActive && expandedMarkerId
+      ? markerRows.filter(({ marker }) => marker.id === expandedMarkerId)
+      : markerRows;
+  const activeColorPickerMarker =
+    expandedMarkerId && openMarkerColorPickerId === expandedMarkerId
+      ? markerRows.find(({ marker }) => marker.id === expandedMarkerId) ?? null
+      : null;
+  const markerHelpText = isMobileViewport
+    ? "Click an icon to drop a marker on the current map location. Marker settings apply to all markers and can be moved directly on the map. In marker edit mode, drag to move markers and use the marker size slider below the location row to resize."
+    : "Click an icon to drop a marker on the current map location. Marker settings apply to all markers and can be moved directly on the map. In marker edit mode, drag to move, use two-finger pinch or mouse wheel to resize, and use scroll or the +/- map controls to zoom.";
 
   return (
     <section className="panel-block color-editor-screen marker-settings-screen">
-      <h2>Markers</h2>
+      {isDeleteAllModalOpen ? (
+        <DeleteAllMarkersModal
+          markerCount={markers.length}
+          onCancel={() => setIsDeleteAllModalOpen(false)}
+          onConfirm={() => {
+            dispatch({ type: "CLEAR_MARKERS" });
+            setExpandedMarkerId(null);
+            setOpenMarkerColorPickerId(null);
+            setIsDeleteAllModalOpen(false);
+          }}
+        />
+      ) : null}
 
-      <div className="color-editor-header">
-        <p className="theme-active-label">
-          {markerRows.length === 0
-            ? "Select a marker"
-            : `Editing ${markerRows.length} marker${markerRows.length === 1 ? "" : "s"}.`}
-        </p>
-        <div className="theme-edit-actions">
-          <button
-            type="button"
-            className="theme-edit-done-btn marker-editor-toolbar-btn marker-editor-toolbar-btn--danger"
-            onClick={handleResetAll}
-          >
-            Reset All
-          </button>
-          <button
-            type="button"
-            className="theme-edit-done-btn marker-editor-toolbar-btn"
-            onClick={() => {
-              setIsEditorActive(false);
-              setIsSettingsOpen(false);
-              setIsDefaultColorPickerOpen(false);
-              setOpenMarkerColorPickerId(null);
-            }}
-          >
-            Done
-          </button>
+      <div className="markers-section-head">
+        <p className="section-summary-label">MARKERS</p>
+        <div className="markers-section-head-actions">
+          {!isMarkerEditorActive ? (
+            <button
+              type="button"
+              className={`marker-row__icon-btn marker-header-action-btn marker-header-settings-btn${isSettingsOpen ? " is-active" : " is-compact"}`}
+              onClick={toggleMarkerSettings}
+              aria-label={
+                isSettingsOpen
+                  ? "Done with marker settings"
+                  : "Open marker settings"
+              }
+              title={
+                isSettingsOpen
+                  ? "Done with marker settings"
+                  : "Open marker settings"
+              }
+            >
+              <span className="marker-row__icon-btn-icon" aria-hidden="true">
+                {isSettingsOpen ? <CheckIcon /> : <GearIcon />}
+              </span>
+              {isSettingsOpen ? (
+                <span className="marker-row__icon-btn-label">Done</span>
+              ) : null}
+            </button>
+          ) : null}
+          {isMarkerEditorActive || !isSettingsOpen ? (
+            <button
+              type="button"
+              className={`marker-row__icon-btn marker-header-action-btn${isMarkerEditorActive ? " is-active" : ""}`}
+              onClick={toggleMarkerEditMode}
+              aria-label={
+                isMarkerEditorActive ? "Done editing markers" : "Edit markers"
+              }
+              title={
+                isMarkerEditorActive ? "Done editing markers" : "Edit markers"
+              }
+              disabled={!isMarkerEditorActive && !hasMarkers}
+            >
+              <span className="marker-row__icon-btn-icon" aria-hidden="true">
+                {isMarkerEditorActive ? <CheckIcon /> : <EditIcon />}
+              </span>
+              <span className="marker-row__icon-btn-label">
+                {isMarkerEditorActive ? "Done" : "Edit Markers"}
+              </span>
+            </button>
+          ) : null}
+          <div className="marker-info-wrap marker-info-wrap--top">
+            <button
+              type="button"
+              className="icon-only-btn marker-info-btn"
+              aria-label="Marker picker help"
+            >
+              <InfoIcon />
+            </button>
+            <div className="marker-info-popover" role="tooltip">{markerHelpText}</div>
+          </div>
         </div>
       </div>
 
       <div className="markers-section__content">
-        {isDeleteAllModalOpen ? (
-          <DeleteAllMarkersModal
-            markerCount={markerRows.length}
-            onCancel={() => setIsDeleteAllModalOpen(false)}
-            onConfirm={() => {
-              dispatch({ type: "CLEAR_MARKERS" });
-              setExpandedMarkerId(null);
-              setOpenMarkerColorPickerId(null);
-              setIsDeleteAllModalOpen(false);
-            }}
+        {!isMarkerEditorActive && !isSettingsOpen ? (
+          <MarkerPicker
+            markerColor={markerDefaults.color}
+            customIcons={customMarkerIcons}
+            onIconClick={addMarker}
+            onUploadIcon={handleUploadIcon}
+            onRemoveUploadedIcon={(iconId) =>
+              dispatch({ type: "REMOVE_CUSTOM_MARKER_ICON", iconId })
+            }
+            onClearUploadedIcons={() =>
+              dispatch({ type: "CLEAR_CUSTOM_MARKER_ICONS" })
+            }
           />
         ) : null}
 
-        <p className="markers-section__empty">
-          Click an icon to drop a marker on the current map location.
-        </p>
-
-        <MarkerPicker
-          markerColor={markerDefaults.color}
-          customIcons={customMarkerIcons}
-          onIconClick={addMarker}
-          onUploadIcon={handleUploadIcon}
-          onRemoveUploadedIcon={(iconId) =>
-            dispatch({ type: "REMOVE_CUSTOM_MARKER_ICON", iconId })
-          }
-          onClearUploadedIcons={() =>
-            dispatch({ type: "CLEAR_CUSTOM_MARKER_ICONS" })
-          }
-          actionSlot={
-            <>
-              <button
-                type="button"
-                className={`marker-picker__upload marker-settings-toggle-btn${
-                  isSettingsOpen ? " is-active" : ""
-                }`}
-                onClick={toggleMarkerSettings}
-              >
-                Marker settings
-              </button>
-              <p className="marker-settings-toggle-hint">
-                Marker settings apply to all markers. Markers can also be moved
-                directly on the map.
-              </p>
-              <p className="markers-section__hint">
-                Use <strong>Edit</strong> on a marker to set exact coordinates
-                and customize its color and size individually.
-              </p>
-            </>
-          }
-        />
-
-        {isSettingsOpen ? (
+        {!isMarkerEditorActive && isSettingsOpen ? (
           <div className="marker-settings-card">
             <div className="marker-settings-card__header">
               <h3>Marker Settings</h3>
             </div>
             <p className="marker-settings-card__theme-note">
-              Marker settings apply to all markers. You can also drag markers on
-              the map while marker editor is open.
+              Marker settings apply to all markers. Unlock markers to edit each
+              marker directly.
             </p>
 
             <div className="marker-editor-card__stack">
@@ -477,202 +534,328 @@ export default function MarkersSection({
           </div>
         ) : null}
 
-        {markerRows.length === 0 ? null : (
-          <div className="markers-section__list">
-            {markerRows.map(({ marker, index, icon, isExpanded }) => {
-              const markerColorChoices = buildDynamicColorChoices(
-                marker.color,
-                markerColorPalette,
-              );
-              const isDisabled = hasActiveMarkerEdit && !isExpanded;
-
-              return (
-                <article
-                  key={marker.id}
-                  className={`marker-editor-card${isDisabled ? " is-disabled" : ""}`}
-                >
-                  <div className="marker-row">
-                    <div className="marker-row__summary">
-                      {icon ? (
-                        <MarkerVisual
-                          icon={icon}
-                          size={26}
-                          color={marker.color}
-                        />
-                      ) : null}
-                      <span className="marker-row__title">
-                        Marker {index + 1}
-                      </span>
-                    </div>
-
-                    <div className="marker-row__actions">
-                      <button
-                        type="button"
-                        className="marker-row__icon-btn"
-                        onClick={() => toggleMarkerEditor(marker.id)}
-                        title={
-                          isExpanded ? "Finish marker editing" : "Edit marker"
-                        }
-                        disabled={isDisabled}
-                      >
-                        <span
-                          className="marker-row__icon-btn-icon"
-                          aria-hidden="true"
-                        >
-                          {isExpanded ? <CheckIcon /> : <EditIcon />}
-                        </span>
-                        <span className="marker-row__icon-btn-label">
-                          {isExpanded ? "Done" : "Edit"}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="marker-row__icon-btn marker-row__icon-btn--danger"
-                        onClick={() =>
-                          dispatch({
-                            type: "REMOVE_MARKER",
-                            markerId: marker.id,
-                          })
-                        }
-                        title="Delete marker"
-                        disabled={isDisabled}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                  </div>
-
-                  {isExpanded ? (
-                    <div className="marker-editor-card__details">
-                      <div className="field-grid keep-two-mobile">
-                        <label>
-                          Latitude
-                          <input
-                            className="form-control-tall"
-                            type="number"
-                            step="0.000001"
-                            value={formatCoordinate(marker.lat)}
-                            onChange={(event) => {
-                              const nextValue = Number(event.target.value);
-                              if (Number.isFinite(nextValue)) {
-                                updateMarker(marker.id, { lat: nextValue });
-                              }
-                            }}
-                          />
-                        </label>
-                        <label>
-                          Longitude
-                          <input
-                            className="form-control-tall"
-                            type="number"
-                            step="0.000001"
-                            value={formatCoordinate(marker.lon)}
-                            onChange={(event) => {
-                              const nextValue = Number(event.target.value);
-                              if (Number.isFinite(nextValue)) {
-                                updateMarker(marker.id, { lon: nextValue });
-                              }
-                            }}
-                          />
-                        </label>
-                      </div>
-
-                      <div className="marker-editor-card__stack">
-                        <label>
-                          Size
-                          <div className="marker-editor-card__size-row">
-                            <input
-                              className="marker-editor-card__size-slider"
-                              type="range"
-                              min={MIN_MARKER_SIZE}
-                              max={MAX_MARKER_SIZE}
-                              step="1"
-                              value={marker.size}
-                              onChange={(event) =>
-                                updateMarker(marker.id, {
-                                  size: Number(event.target.value),
-                                })
-                              }
-                            />
-                            <input
-                              className="form-control-tall marker-editor-card__size-input"
-                              type="number"
-                              min={MIN_MARKER_SIZE}
-                              max={MAX_MARKER_SIZE}
-                              step="1"
-                              value={marker.size}
-                              onChange={(event) => {
-                                const nextValue = Number(event.target.value);
-                                if (Number.isFinite(nextValue)) {
-                                  updateMarker(marker.id, { size: nextValue });
-                                }
-                              }}
-                            />
-                          </div>
-                        </label>
-                        <div>
-                          <span className="marker-settings-card__theme-label">
-                            Color
-                          </span>
-                          <div className="marker-color-control">
-                            <button
-                              type="button"
-                              className="marker-color-display-btn"
-                              onClick={() =>
-                                setOpenMarkerColorPickerId((current) =>
-                                  current === marker.id ? null : marker.id,
-                                )
-                              }
+        {isMarkerEditorActive ? (
+          <>
+            {isColorPickerFocused && activeColorPickerMarker ? (
+              <article className="marker-editor-card">
+                <div className="marker-settings-card__header">
+                  <h3>Edit Marker Color</h3>
+                  <button
+                    type="button"
+                    className="marker-row__icon-btn"
+                    onClick={() => setOpenMarkerColorPickerId(null)}
+                  >
+                    <span className="marker-row__icon-btn-label">Done</span>
+                  </button>
+                </div>
+                <ColorPicker
+                  currentColor={activeColorPickerMarker.marker.color}
+                  suggestedColors={buildDynamicColorChoices(
+                    activeColorPickerMarker.marker.color,
+                    markerColorPalette,
+                  ).suggestedColors}
+                  moreColors={buildDynamicColorChoices(
+                    activeColorPickerMarker.marker.color,
+                    markerColorPalette,
+                  ).moreColors}
+                  onChange={(color) =>
+                    updateMarker(activeColorPickerMarker.marker.id, { color })
+                  }
+                  onResetColor={() =>
+                    updateMarker(activeColorPickerMarker.marker.id, {
+                      color: markerDefaults.color,
+                    })
+                  }
+                />
+              </article>
+            ) : (
+              <>
+                {visibleMarkerRows.length > 0 ? (
+                  <>
+                    {isMobileViewport && !expandedMarkerId ? (
+                      <div className="markers-section__mobile-strip" role="list">
+                        {markerRows.map(({ marker, icon, markerLabel }) => {
+                          const isSelected = marker.id === activeMarkerId;
+                          return (
+                            <article
+                              key={marker.id}
+                              className={`marker-mobile-card${isSelected ? " is-selected" : ""}`}
+                              role="listitem"
                             >
-                              <span
-                                className="marker-editor-card__color-swatch"
-                                aria-hidden="true"
-                                style={{
-                                  backgroundColor: isHexColor(marker.color)
-                                    ? marker.color
-                                    : "#000000",
+                              <button
+                                type="button"
+                                className="marker-mobile-card__delete"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  removeMarker(marker.id);
                                 }}
-                              />
-                              <span className="marker-editor-card__color-value">
-                                {marker.color}
-                              </span>
-                            </button>
-                          </div>
-                          {openMarkerColorPickerId === marker.id ? (
-                            <ColorPicker
-                              currentColor={marker.color}
-                              suggestedColors={
-                                markerColorChoices.suggestedColors
-                              }
-                              moreColors={markerColorChoices.moreColors}
-                              onChange={(color) =>
-                                updateMarker(marker.id, { color })
-                              }
-                              onResetColor={() =>
-                                updateMarker(marker.id, {
-                                  color: markerDefaults.color,
-                                })
-                              }
-                            />
-                          ) : null}
-                        </div>
+                                title="Delete marker"
+                                aria-label={`Delete ${markerLabel}`}
+                              >
+                                <CloseIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className="marker-mobile-card__select"
+                                onClick={() => openMarkerEditor(marker.id)}
+                                title={`Edit ${markerLabel}`}
+                              >
+                                {icon ? (
+                                  <MarkerVisual
+                                    icon={icon}
+                                    size={24}
+                                    color={marker.color}
+                                  />
+                                ) : null}
+                                <span className="marker-mobile-card__label">
+                                  {markerLabel}
+                                </span>
+                              </button>
+                            </article>
+                          );
+                        })}
                       </div>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-            <button
-              type="button"
-              className="marker-delete-all-btn"
-              onClick={() => setIsDeleteAllModalOpen(true)}
-              disabled={hasActiveMarkerEdit}
-            >
-              <TrashIcon />
-              Delete all markers
-            </button>
-          </div>
-        )}
+                    ) : !expandedMarkerId ? (
+                      <div className="markers-section__marker-grid" role="list">
+                        {markerRows.map(({ marker, icon, markerLabel }) => {
+                          const isSelected = marker.id === activeMarkerId;
+                          return (
+                            <article
+                              key={marker.id}
+                              className={`marker-mobile-card${isSelected ? " is-selected" : ""}`}
+                              role="listitem"
+                            >
+                              <button
+                                type="button"
+                                className="marker-mobile-card__delete"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  removeMarker(marker.id);
+                                }}
+                                title="Delete marker"
+                                aria-label={`Delete ${markerLabel}`}
+                              >
+                                <CloseIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className="marker-mobile-card__select"
+                                onClick={() => openMarkerEditor(marker.id)}
+                                title={`Edit ${markerLabel}`}
+                              >
+                                {icon ? (
+                                  <MarkerVisual
+                                    icon={icon}
+                                    size={24}
+                                    color={marker.color}
+                                  />
+                                ) : null}
+                                <span className="marker-mobile-card__label">
+                                  {markerLabel}
+                                </span>
+                              </button>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="markers-section__list">
+                        {visibleMarkerRows.map(
+                          ({ marker, icon, markerLabel, isExpanded }) => {
+                            return (
+                              <article key={marker.id} className="marker-editor-card">
+                                <div className="marker-row">
+                                  <div className="marker-row__summary">
+                                    {icon ? (
+                                      <MarkerVisual
+                                        icon={icon}
+                                        size={26}
+                                        color={marker.color}
+                                      />
+                                    ) : null}
+                                    <span className="marker-row__title">{markerLabel}</span>
+                                  </div>
+
+                                  <div className="marker-row__actions">
+                                    <button
+                                      type="button"
+                                      className="marker-row__icon-btn"
+                                      onClick={() => toggleMarkerEditor(marker.id)}
+                                      title={
+                                        isExpanded
+                                          ? "Finish marker editing"
+                                          : "Edit marker"
+                                      }
+                                    >
+                                      <span
+                                        className="marker-row__icon-btn-icon"
+                                        aria-hidden="true"
+                                      >
+                                        {isExpanded ? <CheckIcon /> : <EditIcon />}
+                                      </span>
+                                      <span className="marker-row__icon-btn-label">
+                                        {isExpanded ? "Done" : "Edit"}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="marker-row__icon-btn marker-row__icon-btn--danger"
+                                      onClick={() => removeMarker(marker.id)}
+                                      title="Delete marker"
+                                    >
+                                      <TrashIcon />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {isExpanded ? (
+                                  <div className="marker-editor-card__details">
+                                    <div className="field-grid keep-two-mobile">
+                                      <label>
+                                        Latitude
+                                        <input
+                                          className="form-control-tall"
+                                          type="number"
+                                          step="0.000001"
+                                          value={formatCoordinate(marker.lat)}
+                                          onChange={(event) => {
+                                            const nextValue = Number(event.target.value);
+                                            if (Number.isFinite(nextValue)) {
+                                              updateMarker(marker.id, { lat: nextValue });
+                                            }
+                                          }}
+                                        />
+                                      </label>
+                                      <label>
+                                        Longitude
+                                        <input
+                                          className="form-control-tall"
+                                          type="number"
+                                          step="0.000001"
+                                          value={formatCoordinate(marker.lon)}
+                                          onChange={(event) => {
+                                            const nextValue = Number(event.target.value);
+                                            if (Number.isFinite(nextValue)) {
+                                              updateMarker(marker.id, { lon: nextValue });
+                                            }
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+
+                                    <div className="marker-editor-card__stack">
+                                      <label>
+                                        Size
+                                        <div className="marker-editor-card__size-row">
+                                          <input
+                                            className="marker-editor-card__size-slider"
+                                            type="range"
+                                            min={MIN_MARKER_SIZE}
+                                            max={MAX_MARKER_SIZE}
+                                            step="1"
+                                            value={marker.size}
+                                            onChange={(event) =>
+                                              updateMarker(marker.id, {
+                                                size: Number(event.target.value),
+                                              })
+                                            }
+                                          />
+                                          <input
+                                            className="form-control-tall marker-editor-card__size-input"
+                                            type="number"
+                                            min={MIN_MARKER_SIZE}
+                                            max={MAX_MARKER_SIZE}
+                                            step="1"
+                                            value={marker.size}
+                                            onChange={(event) => {
+                                              const nextValue = Number(event.target.value);
+                                              if (Number.isFinite(nextValue)) {
+                                                updateMarker(marker.id, { size: nextValue });
+                                              }
+                                            }}
+                                          />
+                                        </div>
+                                      </label>
+                                      <div>
+                                        <span className="marker-settings-card__theme-label">
+                                          Color
+                                        </span>
+                                        <div className="marker-color-control">
+                                          <button
+                                            type="button"
+                                            className="marker-color-display-btn"
+                                            onClick={() =>
+                                              setOpenMarkerColorPickerId((current) =>
+                                                current === marker.id ? null : marker.id,
+                                              )
+                                            }
+                                          >
+                                            <span
+                                              className="marker-editor-card__color-swatch"
+                                              aria-hidden="true"
+                                              style={{
+                                                backgroundColor: isHexColor(marker.color)
+                                                  ? marker.color
+                                                  : "#000000",
+                                              }}
+                                            />
+                                            <span className="marker-editor-card__color-value">
+                                              {marker.color}
+                                            </span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          },
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="marker-settings-card__theme-note">
+                    Add at least one marker, then unlock markers to edit.
+                  </p>
+                )}
+                {!expandedMarkerId && hasMarkers ? (
+                  <p className="marker-settings-toggle-hint marker-settings-toggle-hint--editor">
+                    {isMobileViewport
+                      ? "Swipe the marker row to choose one, then tap it to edit. Drag it on the map to move it, and use the marker-size slider below the location row to resize."
+                      : "Click a marker card to edit it. Drag the selected marker on the map to move it, then adjust size and color in the editor."}
+                  </p>
+                ) : null}
+
+                {!expandedMarkerId && hasMarkers ? (
+                  <div className="markers-section__actions">
+                    <button
+                      type="button"
+                      className="marker-row__icon-btn"
+                      onClick={handleResetMarkers}
+                      title="Reset all markers"
+                    >
+                      <RotateLeftIcon />
+                      <span className="marker-row__icon-btn-label">Reset Markers</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="marker-row__icon-btn marker-row__icon-btn--danger"
+                      onClick={handleDeleteAllMarkers}
+                      title="Delete all markers"
+                    >
+                      <TrashIcon />
+                      <span className="marker-row__icon-btn-label">
+                        Delete All Markers
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </>
+        ) : null}
       </div>
     </section>
   );

@@ -87,8 +87,22 @@ export default function MarkerPicker({
             <span className="marker-picker__label">{icon.label}</span>
           </button>
         ))}
+        {appIcons.length > featuredMarkerIcons.length ? (
+          <button
+            type="button"
+            className="marker-picker__option marker-picker__option--toggle"
+            onClick={() => setIsExpanded((prev) => !prev)}
+            aria-label={shouldShowAllIcons ? "Show icon list" : "Show more icons"}
+          >
+            <span className="marker-picker__toggle-sign" aria-hidden="true">
+              {shouldShowAllIcons ? "-" : "+"}
+            </span>
+            <span className="marker-picker__label">
+              {shouldShowAllIcons ? "Show less" : "More Icons"}
+            </span>
+          </button>
+        ) : null}
       </div>
-      <div className="marker-picker__divider" />
 
       <p className="marker-picker__section-title">Uploaded Markers</p>
       <div className="marker-picker__grid marker-picker__grid--uploaded">
@@ -168,15 +182,6 @@ export default function MarkerPicker({
       <div className="marker-picker__divider marker-picker__divider--actions" />
 
       <div className="marker-picker__actions">
-        {appIcons.length > featuredMarkerIcons.length ? (
-          <button
-            type="button"
-            className="marker-picker__toggle"
-            onClick={() => setIsExpanded((prev) => !prev)}
-          >
-            {shouldShowAllIcons ? "Show less" : "More icons"}
-          </button>
-        ) : null}
         {actionSlot}
       </div>
 

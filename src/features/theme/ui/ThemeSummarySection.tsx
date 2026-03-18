@@ -1,42 +1,63 @@
+import type { RefObject } from "react";
 import ThemeCard from "./ThemeCard";
 import { EditIcon } from "@/shared/ui/Icons";
 import type { ThemeOption } from "../domain/types";
 
 interface ThemeSummarySectionProps {
-  themeName: string;
-  themeOption: ThemeOption;
+  listRef?: RefObject<HTMLDivElement>;
+  themeOptions: ThemeOption[];
+  selectedThemeId: string;
+  selectedThemeOption: ThemeOption;
+  onThemeSelect: (themeId: string) => void;
   onCustomize: () => void;
-  onOpenThemePicker: () => void;
 }
 
 export default function ThemeSummarySection({
-  themeName,
-  themeOption,
+  listRef,
+  themeOptions,
+  selectedThemeId,
+  selectedThemeOption,
+  onThemeSelect,
   onCustomize,
-  onOpenThemePicker,
 }: ThemeSummarySectionProps) {
+  const description =
+    selectedThemeOption.description?.trim() || "No description available.";
+
   return (
-    <div className="theme-section">
-      <div className="theme-summary-view">
-        <div className="theme-summary-header">
-          <p className="theme-active-label">Theme: {themeName}</p>
-          <button
-            type="button"
-            className="theme-customize-btn"
-            onClick={onCustomize}
-            aria-label="Customize theme colors"
-          >
-            <span className="theme-customize-icon" aria-hidden="true">
-              <EditIcon />
-            </span>
-            Customize
-          </button>
+    <div className="theme-summary-view">
+      <div className="theme-summary-head">
+        <div className="theme-summary-copy">
+          <p className="theme-summary-label">
+            Theme: <span className="theme-summary-label-name">{selectedThemeOption.name}</span>
+          </p>
+          <p className="theme-card-description">{description}</p>
         </div>
-        <ThemeCard
-          themeOption={themeOption}
-          showName={false}
-          onClick={onOpenThemePicker}
-        />
+        <button
+          type="button"
+          className="theme-customize-btn"
+          onClick={onCustomize}
+          aria-label={`Customize ${selectedThemeOption.name} colors`}
+        >
+          <span className="theme-customize-icon" aria-hidden="true">
+            <EditIcon />
+          </span>
+        </button>
+      </div>
+
+      <div
+        className="theme-card-list card-scroll-list"
+        role="list"
+        aria-label="Theme options"
+        ref={listRef}
+      >
+        {themeOptions.map((themeOption) => (
+          <ThemeCard
+            key={themeOption.id}
+            themeOption={themeOption}
+            isSelected={themeOption.id === selectedThemeId}
+            onClick={() => onThemeSelect(themeOption.id)}
+          />
+        ))}
       </div>
     </div>
   );

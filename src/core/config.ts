@@ -9,7 +9,7 @@ export const DEFAULT_POSTER_WIDTH_CM = 20;
 export const DEFAULT_POSTER_HEIGHT_CM = 30;
 export const LAYOUT_MATCH_TOLERANCE_CM = 0.01;
 
-export const MIN_DISTANCE_METERS = 1_000;
+export const MIN_DISTANCE_METERS = 100;
 export const MAX_DISTANCE_METERS = 20_000_000;
 export const DEFAULT_DISTANCE_METERS = 4_000;
 
@@ -51,8 +51,12 @@ export const SOCIAL_REDDIT = import.meta.env.VITE_SOCIAL_REDDIT ?? "";
 export const SOCIAL_THREADS = import.meta.env.VITE_SOCIAL_THREADS ?? "";
 export const SOCIAL_YOUTUBE = import.meta.env.VITE_SOCIAL_YOUTUBE ?? "";
 export const KOFI_URL = import.meta.env.VITE_KOFI_URL ?? "";
+export const DEVELOPER_NAME = import.meta.env.VITE_DEVELOPER_NAME ?? "";
+export const DEVELOPER_PROFILE_URL =
+  import.meta.env.VITE_DEVELOPER_PROFILE_URL ?? "";
 export const APP_CREDIT_URL =
   import.meta.env.VITE_APP_CREDIT_URL ?? "terraink.app";
+export const INSTALL_DIAGNOSTICS_ENABLED = false;
 
 export interface FontOption {
   value: string;

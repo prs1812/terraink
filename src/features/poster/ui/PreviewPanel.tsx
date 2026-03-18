@@ -11,16 +11,14 @@ import MapPreview from "@/features/map/ui/MapPreview";
 import MarkerOverlay from "@/features/markers/ui/MarkerOverlay";
 import GradientFades from "./GradientFades";
 import PosterTextOverlay from "./PosterTextOverlay";
+import SettingsInfo from "./SettingsInfo";
+import MapPrimaryControls from "./MapPrimaryControls";
 import {
-  EditIcon,
-  FinishIcon,
   PlusIcon,
   MinusIcon,
   RotateIcon,
   RotateLeftIcon,
   RotateRightIcon,
-  LockIcon,
-  RecenterIcon,
 } from "@/shared/ui/Icons";
 import {
   MAP_BUTTON_ZOOM_DURATION_MS,
@@ -37,10 +35,14 @@ import {
   DEFAULT_COUNTRY,
 } from "@/core/config";
 import { ensureGoogleFont, reverseGeocodeCoordinates } from "@/core/services";
+import {
+  createCustomLayoutOption,
+  formatLayoutDimensions,
+  getLayoutOption,
+} from "@/features/layout/infrastructure/layoutRepository";
 
 const LOCKED_HINT = "Map is locked to prevent unintended movement.";
-const EDIT_HINT_ACTIVE =
-  "Drag to move and scroll or pinch to zoom.\nUse arrow keys to move the map and +/- to zoom.";
+const UNLOCK_HINT = `${LOCKED_HINT}\nClick to unlock map editing.`;
 const RECENTER_HINT = "Recenter map to the current location";
 const COUNTRY_VIEW_ZOOM_LEVEL = 10;
 const CONTINENT_VIEW_ZOOM_LEVEL = 6;
@@ -48,10 +50,16 @@ const DEFAULT_LOCATION_LABEL =
   "Hanover, Region Hannover, Lower Saxony, Germany";
 
 export default function PreviewPanel() {
-  const { state, dispatch, effectiveTheme, mapStyle, mapRef } = usePosterContext();
-  const { form, selectedLocation, userLocation } = state;
+  const { state, dispatch, effectiveTheme, mapStyle, mapRef } =
+    usePosterContext();
+  const {
+    form,
+    selectedLocation,
+    userLocation,
+    isMarkerEditorActive,
+    activeMarkerId,
+  } = state;
   const hasVisibleMarkers = form.showMarkers && state.markers.length > 0;
-  const isMarkerEditorActive = state.isMarkerEditorActive;
   const {
     mapCenter,
     mapZoom,
@@ -63,9 +71,27 @@ export default function PreviewPanel() {
   } = useMapSync();
 
   const frameRef = useRef<HTMLDivElement | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ghostMapRef = useRef<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [mapBearing, setMapBearing] = useState(0);
   const [isRotationEnabled, setIsRotationEnabled] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mediaQuery = window.matchMedia(
+      "(max-width: 768px), (hover: none) and (pointer: coarse)",
+    );
+    const syncViewport = () => setIsMobileViewport(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncViewport);
+    };
+  }, []);
 
   useEffect(() => {
     const element = frameRef.current;
@@ -103,6 +129,35 @@ export default function PreviewPanel() {
   }, [mapRef]);
 
   useEffect(() => {
+    const sourceMap = mapRef.current;
+    const ghostMap = ghostMapRef.current;
+    if (!sourceMap || !ghostMap) return;
+
+    const syncGhostViewport = () => {
+      const center = sourceMap.getCenter();
+      ghostMap.jumpTo({
+        center: [center.lng, center.lat],
+        zoom: sourceMap.getZoom(),
+        bearing: sourceMap.getBearing(),
+        pitch: sourceMap.getPitch(),
+      });
+    };
+
+    syncGhostViewport();
+    sourceMap.on("move", syncGhostViewport);
+    sourceMap.on("zoom", syncGhostViewport);
+    sourceMap.on("rotate", syncGhostViewport);
+    sourceMap.on("pitch", syncGhostViewport);
+
+    return () => {
+      sourceMap.off("move", syncGhostViewport);
+      sourceMap.off("zoom", syncGhostViewport);
+      sourceMap.off("rotate", syncGhostViewport);
+      sourceMap.off("pitch", syncGhostViewport);
+    };
+  }, [mapRef, mapStyle]);
+
+  useEffect(() => {
     if (!isMarkerEditorActive) {
       return;
     }
@@ -113,9 +168,20 @@ export default function PreviewPanel() {
   const widthCm = Number(form.width) || DEFAULT_POSTER_WIDTH_CM;
   const heightCm = Number(form.height) || DEFAULT_POSTER_HEIGHT_CM;
   const aspect = widthCm / heightCm;
-
   const formLat = Number(form.latitude) || 0;
   const formLon = Number(form.longitude) || 0;
+  const layoutOption =
+    getLayoutOption(form.layout) ?? createCustomLayoutOption(widthCm, heightCm);
+  const posterSizeLabel = formatLayoutDimensions(layoutOption);
+  const layoutLabel = `${layoutOption.name} (${formatLayoutDimensions(layoutOption)})`;
+  const infoLocationLabel =
+    [form.displayCity, form.displayCountry].filter(Boolean).join(", ") ||
+    form.location ||
+    DEFAULT_LOCATION_LABEL;
+  const infoLayoutLabel = layoutOption.name;
+  const markerCount = state.markers.length;
+  const markersLabel = `${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+  const coordinatesLabel = `${formLat.toFixed(4)}, ${formLon.toFixed(4)}`;
   const isCityCountryView = mapZoom >= COUNTRY_VIEW_ZOOM_LEVEL;
   const isCountryContinentView =
     mapZoom >= CONTINENT_VIEW_ZOOM_LEVEL && mapZoom < COUNTRY_VIEW_ZOOM_LEVEL;
@@ -205,8 +271,7 @@ export default function PreviewPanel() {
   const handleRecenter = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    const target =
-      selectedLocation ||
+    const target = selectedLocation ||
       userLocation || {
         id: "fallback:hanover",
         label: DEFAULT_LOCATION_LABEL,
@@ -271,20 +336,17 @@ export default function PreviewPanel() {
           resetDisplayNameOverrides: true,
           fields: {
             displayCity: String(resolved.city ?? "").trim() || DEFAULT_CITY,
-            displayCountry: String(resolved.country ?? "").trim() || DEFAULT_COUNTRY,
-            displayContinent: String(resolved.continent ?? "").trim() || "Europe",
+            displayCountry:
+              String(resolved.country ?? "").trim() || DEFAULT_COUNTRY,
+            displayContinent:
+              String(resolved.continent ?? "").trim() || "Europe",
           },
         });
       })
       .catch(() => {
         // fallback names already applied above — nothing more to do.
       });
-  }, [
-    mapRef,
-    selectedLocation,
-    userLocation,
-    dispatch,
-  ]);
+  }, [mapRef, selectedLocation, userLocation, dispatch]);
 
   const handleMarkerPositionChange = useCallback(
     (markerId: string, lat: number, lon: number) => {
@@ -297,9 +359,44 @@ export default function PreviewPanel() {
     [dispatch],
   );
 
+  const handleMarkerActiveChange = useCallback(
+    (markerId: string | null) => {
+      dispatch({ type: "SET_ACTIVE_MARKER", markerId });
+    },
+    [dispatch],
+  );
+
+  const handleMarkerSizeChange = useCallback(
+    (markerId: string, size: number) => {
+      dispatch({
+        type: "UPDATE_MARKER",
+        markerId,
+        changes: { size },
+      });
+    },
+    [dispatch],
+  );
+
   return (
     <section className="preview-panel">
       <div className="poster-viewport">
+        {/* Desktop ghost map: full-bleed map behind the poster frame at reduced opacity */}
+        <div className="poster-ghost-layer" aria-hidden="true">
+          <MapPreview
+            style={mapStyle}
+            center={mapCenter}
+            zoom={mapZoom}
+            mapRef={ghostMapRef}
+            interactive={false}
+            allowRotation={false}
+            minZoom={mapMinZoom}
+            maxZoom={mapMaxZoom}
+            overzoomScale={MAP_OVERZOOM_SCALE}
+          />
+        </div>
+        <div className="desktop-layout-label" aria-hidden="true">
+          {layoutLabel}
+        </div>
         <div
           ref={frameRef}
           className="poster-frame"
@@ -323,14 +420,19 @@ export default function PreviewPanel() {
             onMove={handleMove}
             onMoveEnd={handleMoveEnd}
           />
-          {form.showMarkers ? <GradientFades color={effectiveTheme.ui.bg} /> : null}
+          {form.showMarkers ? (
+            <GradientFades color={effectiveTheme.ui.bg} />
+          ) : null}
           {hasVisibleMarkers ? (
             <MarkerOverlay
               markers={state.markers}
               customIcons={state.customMarkerIcons}
               mapRef={mapRef}
               isMarkerEditMode={isMarkerEditorActive}
+              activeMarkerId={activeMarkerId}
+              onActiveMarkerChange={handleMarkerActiveChange}
               onMarkerPositionChange={handleMarkerPositionChange}
+              onMarkerSizeChange={handleMarkerSizeChange}
             />
           ) : null}
           <PosterTextOverlay
@@ -345,141 +447,141 @@ export default function PreviewPanel() {
             includeCredits={form.includeCredits}
             showOverlay={form.showMarkers}
           />
+
+          <div className="map-controls" aria-label="Map controls">
+            {!isEditing ? (
+              <>
+                <div className="map-control-group">
+                  <MapPrimaryControls
+                    isMapEditing={false}
+                    isMarkerEditorActive={isMarkerEditorActive}
+                    recenterHint={RECENTER_HINT}
+                    unlockHint={UNLOCK_HINT}
+                    onRecenter={handleRecenter}
+                    onStartEditing={handleStartEditing}
+                    onFinishEditing={handleFinishEditing}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="map-control-group">
+                  <MapPrimaryControls
+                    isMapEditing
+                    isMarkerEditorActive={isMarkerEditorActive}
+                    recenterHint={RECENTER_HINT}
+                    unlockHint={UNLOCK_HINT}
+                    onRecenter={handleRecenter}
+                    onStartEditing={handleStartEditing}
+                    onFinishEditing={handleFinishEditing}
+                  />
+                  {isMobileViewport ? (
+                    <button
+                      type="button"
+                      className={`map-control-btn${isRotationEnabled ? " is-active" : ""}`}
+                      onClick={handleToggleRotation}
+                      title={
+                        isRotationEnabled ? "Disable rotation" : "Enable rotation"
+                      }
+                    >
+                      <RotateIcon />
+                      <span>
+                        {isRotationEnabled ? "Disable Rotation" : "Enable Rotation"}
+                      </span>
+                    </button>
+                  ) : null}
+                </div>
+                {!isMobileViewport ? (
+                  <div className="map-control-group">
+                    <button
+                      type="button"
+                      className={`map-control-btn${isRotationEnabled ? " is-active" : ""}`}
+                      onClick={handleToggleRotation}
+                      title={
+                        isRotationEnabled ? "Disable rotation" : "Enable rotation"
+                      }
+                    >
+                      <RotateIcon />
+                      <span>
+                        {isRotationEnabled ? "Disable Rotation" : "Enable Rotation"}
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
+                {!isMobileViewport ? (
+                  <div className="map-control-group map-control-slider-row">
+                    <button
+                      type="button"
+                      className="map-control-btn"
+                      onClick={handleZoomOut}
+                      title="Zoom out"
+                    >
+                      <MinusIcon />
+                    </button>
+                    <input
+                      className="map-control-slider"
+                      type="range"
+                      min={mapMinZoom}
+                      max={mapMaxZoom}
+                      step={0.1}
+                      value={mapZoom}
+                      onChange={handleZoomSliderChange}
+                      aria-label="Zoom level"
+                    />
+                    <button
+                      type="button"
+                      className="map-control-btn"
+                      onClick={handleZoomIn}
+                      title="Zoom in"
+                    >
+                      <PlusIcon />
+                    </button>
+                  </div>
+                ) : null}
+                {!isMobileViewport && isRotationEnabled ? (
+                  <div className="map-control-group map-control-slider-row">
+                    <button
+                      type="button"
+                      className="map-control-btn"
+                      onClick={() => handleRotateBy(-15)}
+                      title="Rotate left 15 degrees"
+                    >
+                      <RotateLeftIcon />
+                    </button>
+                    <input
+                      className="map-control-slider"
+                      type="range"
+                      min={-180}
+                      max={180}
+                      step={15}
+                      value={Math.round(mapBearing / 15) * 15}
+                      onChange={handleRotationSliderChange}
+                      aria-label="Rotation angle"
+                    />
+                    <button
+                      type="button"
+                      className="map-control-btn"
+                      onClick={() => handleRotateBy(15)}
+                      title="Rotate right 15 degrees"
+                    >
+                      <RotateRightIcon />
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      <section className="map-controls-section" aria-label="Map controls">
-        <div className="map-controls">
-          {!isEditing ? (
-            <>
-              <div className="map-control-group">
-                <button
-                  type="button"
-                  className="map-control-btn"
-                  onClick={handleRecenter}
-                  title={RECENTER_HINT}
-                >
-                  <RecenterIcon />
-                  <span>Recenter</span>
-                </button>
-                <button
-                  type="button"
-                  className="map-control-btn map-control-btn--primary"
-                  onClick={handleStartEditing}
-                  title={
-                    isMarkerEditorActive
-                      ? "Close marker editor to unlock map editing"
-                      : "Unlock map editing"
-                  }
-                  disabled={isMarkerEditorActive}
-                >
-                  <EditIcon />
-                  <span>Edit Map</span>
-                </button>
-              </div>
-              <p className="map-control-hint">
-                <LockIcon className="map-control-hint-icon" />
-                {isMarkerEditorActive
-                  ? "Map editing is disabled while marker editor is open."
-                  : LOCKED_HINT}
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="map-control-group">
-                <button
-                  type="button"
-                  className="map-control-btn"
-                  onClick={handleRecenter}
-                  title={RECENTER_HINT}
-                >
-                  <RecenterIcon />
-                  <span>Recenter</span>
-                </button>
-                <button
-                  type="button"
-                  className="map-control-btn map-control-btn--primary"
-                  onClick={handleFinishEditing}
-                  title="Lock map editing"
-                >
-                  <FinishIcon />
-                  <span>Finish</span>
-                </button>
-                <button
-                  type="button"
-                  className={`map-control-btn${isRotationEnabled ? " is-active" : ""}`}
-                  onClick={handleToggleRotation}
-                  title={isRotationEnabled ? "Disable rotation" : "Enable rotation"}
-                >
-                  <RotateIcon />
-                  <span>{isRotationEnabled ? "Disable Rotation" : "Enable Rotation"}</span>
-                </button>
-              </div>
-              <p className="map-control-hint">
-                {EDIT_HINT_ACTIVE}
-              </p>
-              <div className="map-control-group map-control-slider-row">
-                <button
-                  type="button"
-                  className="map-control-btn"
-                  onClick={handleZoomOut}
-                  title="Zoom out"
-                >
-                  <MinusIcon />
-                </button>
-                <input
-                  className="map-control-slider"
-                  type="range"
-                  min={mapMinZoom}
-                  max={mapMaxZoom}
-                  step={0.1}
-                  value={mapZoom}
-                  onChange={handleZoomSliderChange}
-                  aria-label="Zoom level"
-                />
-                <button
-                  type="button"
-                  className="map-control-btn"
-                  onClick={handleZoomIn}
-                  title="Zoom in"
-                >
-                  <PlusIcon />
-                </button>
-              </div>
-              {isRotationEnabled ? (
-                <div className="map-control-group map-control-slider-row">
-                  <button
-                    type="button"
-                    className="map-control-btn"
-                    onClick={() => handleRotateBy(-15)}
-                    title="Rotate left 15 degrees"
-                  >
-                    <RotateLeftIcon />
-                  </button>
-                  <input
-                    className="map-control-slider"
-                    type="range"
-                    min={-180}
-                    max={180}
-                    step={15}
-                    value={Math.round(mapBearing / 15) * 15}
-                    onChange={handleRotationSliderChange}
-                    aria-label="Rotation angle"
-                  />
-                  <button
-                    type="button"
-                    className="map-control-btn"
-                    onClick={() => handleRotateBy(15)}
-                    title="Rotate right 15 degrees"
-                  >
-                    <RotateRightIcon />
-                  </button>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      </section>
+      <SettingsInfo
+        location={infoLocationLabel}
+        theme={effectiveTheme.name}
+        layout={infoLayoutLabel}
+        posterSize={posterSizeLabel}
+        markers={markersLabel}
+        coordinates={coordinatesLabel}
+      />
     </section>
   );
 }

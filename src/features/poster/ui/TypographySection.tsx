@@ -97,7 +97,7 @@ export default function TypographySection({
         />
       )}
       <section className="panel-block">
-        <h2>Typography</h2>
+        <p className="section-summary-label">STYLE</p>
         <label className="toggle-field">
           <span>Poster text</span>
           <span className="theme-switch">
